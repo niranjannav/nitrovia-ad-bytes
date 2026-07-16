@@ -14,11 +14,15 @@ def _ensure_key():
     os.environ["FAL_KEY"] = require("fal")
 
 
-async def _run(model: str, arguments: dict) -> dict:
+async def run_fal(model: str, arguments: dict) -> dict:
+    """Run any fal.ai endpoint (also used by providers/audio.py for Kokoro TTS)."""
     _ensure_key()
     import fal_client
 
     return await fal_client.run_async(model, arguments=arguments)
+
+
+_run = run_fal  # internal alias
 
 
 async def generate_image(prompt: str, width: int = 1080, height: int = 1920) -> bytes:
@@ -53,8 +57,11 @@ async def generate_video(image_url: str, prompt: str, duration_s: int) -> bytes:
     return await _download(url)
 
 
-async def _download(url: str) -> bytes:
+async def download(url: str) -> bytes:
     async with httpx.AsyncClient(timeout=300, follow_redirects=True) as client:
         r = await client.get(url)
         r.raise_for_status()
         return r.content
+
+
+_download = download  # internal alias

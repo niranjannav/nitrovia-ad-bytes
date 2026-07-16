@@ -5,7 +5,7 @@ ordered list of segments. This is the approval gate: nothing costing real
 money runs before a human approves these segments."""
 
 from .. import db
-from ..config import MissingKeyError
+from ..config import MissingKeyError, settings
 from ..providers import audio, llm
 
 SCRIPT_SCHEMA = {
@@ -49,13 +49,15 @@ async def retrieve_products(brand_id: str, query: str, limit: int = 8) -> list[d
     try:
         vectors = await audio.embed([query])
         vec = "[" + ",".join(f"{v:.6f}" for v in vectors[0]) + "]"
+        # Only compare vectors produced by the currently configured model —
+        # chunks embedded with a different model fall through to recency.
         rows = await db.fetch(
             """SELECT DISTINCT ON (p.id) p.id, p.title, p.description, p.price
                FROM product_chunks c JOIN products p ON p.id = c.product_id
-               WHERE c.brand_id = $1 AND c.embedding IS NOT NULL
+               WHERE c.brand_id = $1 AND c.embedding IS NOT NULL AND c.embedding_model = $4
                ORDER BY p.id, c.embedding <=> $2::vector
                LIMIT $3""",
-            brand_id, vec, limit,
+            brand_id, vec, limit, settings.embeddings_model,
         )
         if rows:
             return rows

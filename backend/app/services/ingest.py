@@ -213,8 +213,9 @@ async def _embed_products(brand_id: str):
     vectors = await audio.embed(texts)
     for text, product_id, vec in zip(texts, refs, vectors):
         await db.execute(
-            "INSERT INTO product_chunks (brand_id, product_id, chunk_text, embedding) VALUES ($1,$2,$3,$4::vector)",
-            brand_id, product_id, text, "[" + ",".join(f"{v:.6f}" for v in vec) + "]",
+            """INSERT INTO product_chunks (brand_id, product_id, chunk_text, embedding, embedding_model)
+               VALUES ($1,$2,$3,$4::vector,$5)""",
+            brand_id, product_id, text, "[" + ",".join(f"{v:.6f}" for v in vec) + "]", settings.embeddings_model,
         )
 
 

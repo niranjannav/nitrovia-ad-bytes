@@ -85,8 +85,10 @@ export function KeyBanner({ message }: { message?: string | null }) {
 
 const KEY_LABELS: Record<string, string> = {
   anthropic: "Claude (scripts & voice)",
-  openai: "OpenAI (VO, Whisper, embeddings)",
   fal: "fal.ai (images & video)",
+  tts: "Voiceover (Kokoro)",
+  embeddings: "Embeddings (OpenRouter free)",
+  stt: "Transcription (Whisper)",
   supabase: "Supabase URL",
   supabase_key: "Supabase key",
   database: "Database",

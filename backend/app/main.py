@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from . import db, worker
-from .config import MissingKeyError, ffmpeg_available, provider_status, settings
+from .config import CAPABILITIES, MissingKeyError, ffmpeg_available, provider_status, settings
 from .routers import brands, projects, references
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -62,21 +62,25 @@ async def missing_key_handler(_: Request, exc: MissingKeyError):
 async def health():
     status = provider_status()
     ready_to_plan = all(status[p] for p in ("anthropic", "database", "supabase", "supabase_key"))
-    ready_to_generate = ready_to_plan and status["fal"] and status["openai"]
+    ready_to_generate = ready_to_plan and status["fal"] and status["tts"]
+    env_vars = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "fal": "FAL_KEY",
+        "supabase": "SUPABASE_URL",
+        "supabase_key": "SUPABASE_SERVICE_ROLE_KEY",
+        "database": "DATABASE_URL",
+    }
+    # capability hints resolve dynamically (e.g. tts points at FAL_KEY or TTS_API_KEY
+    # depending on TTS_PROVIDER)
+    for name, resolver in CAPABILITIES.items():
+        env_vars[name] = resolver()[1]
     return {
         "ok": True,
         "providers": status,
         "ffmpeg": ffmpeg_available(),
         "ready_to_plan": ready_to_plan,
         "ready_to_generate": ready_to_generate,
-        "env_vars": {
-            "anthropic": "ANTHROPIC_API_KEY",
-            "openai": "OPENAI_API_KEY",
-            "fal": "FAL_KEY",
-            "supabase": "SUPABASE_URL",
-            "supabase_key": "SUPABASE_SERVICE_ROLE_KEY",
-            "database": "DATABASE_URL",
-        },
+        "env_vars": env_vars,
     }
 
 

@@ -107,8 +107,8 @@ async def process_reference(reference_id: str):
         try:
             audio_file = await extract_audio(video, tmp_dir)
             transcript = await audio.transcribe(audio_file)
-        except MissingKeyError:
-            transcript = "(transcript unavailable — OPENAI_API_KEY not set)"
+        except MissingKeyError as e:
+            transcript = f"(transcript unavailable — {e})"
 
         frames = await sample_frames(video, tmp_dir)
         frame_paths = []

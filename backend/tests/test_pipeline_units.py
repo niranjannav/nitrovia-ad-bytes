@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from app.config import MissingKeyError, PROVIDERS, provider_status
+from app.config import CAPABILITIES, MissingKeyError, STATIC_PROVIDERS, provider_status
 from app.services import stitch
 from app.services.compositing import composite_design
 from app.services.media_pipeline import _segment_duration
@@ -47,6 +47,7 @@ def test_segment_filter_without_caption(monkeypatch):
 
 def test_provider_status_and_missing_key_message():
     status = provider_status()
-    assert set(status) == set(PROVIDERS)
+    assert set(status) == set(STATIC_PROVIDERS) | set(CAPABILITIES)
+    assert {"tts", "embeddings", "stt"} <= set(status)
     err = MissingKeyError("fal", "FAL_KEY", "image generation")
     assert "FAL_KEY" in str(err) and "image generation" in str(err)

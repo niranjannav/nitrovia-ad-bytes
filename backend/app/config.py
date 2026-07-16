@@ -1,7 +1,11 @@
 """Central configuration. Every provider key is optional at boot: the app starts
 with an empty .env and reports what is missing via /health. Services raise
 MissingKeyError at call time so the UI can tell the user exactly which env var
-to fill."""
+to fill.
+
+Audio + embedding capabilities (tts / embeddings / stt) are independently
+configurable and can each point at a cloud provider or a model running locally
+(e.g. on an Apple Silicon Mac) — see .env.example for recipes."""
 
 import os
 from pathlib import Path
@@ -19,19 +23,45 @@ load_dotenv()
 class Settings(BaseSettings):
     # ---- API keys (fill in .env) ----
     anthropic_api_key: str = ""
-    openai_api_key: str = ""
     fal_key: str = ""
+    openrouter_api_key: str = ""  # free NVIDIA embeddings via OpenRouter
+    openai_api_key: str = ""      # optional — only STT (Whisper) uses it by default
     supabase_url: str = ""
     supabase_service_role_key: str = ""
     database_url: str = ""
     shopify_admin_token: str = ""  # optional; public /products.json used otherwise
 
-    # ---- Model / provider tuning (sensible defaults, override in .env) ----
+    # ---- Script/vision model (Claude) ----
     claude_model: str = "claude-opus-4-8"
-    openai_tts_model: str = "tts-1"
-    openai_tts_voice: str = "alloy"
-    openai_whisper_model: str = "whisper-1"
-    openai_embedding_model: str = "text-embedding-3-small"
+
+    # ---- TTS (voiceover) — cheapest first: Kokoro 82M ----
+    # "fal"               -> Kokoro hosted on fal.ai (reuses FAL_KEY, ~$0.02/1k chars)
+    # "local"             -> in-process kokoro-onnx ($0; pip install -r requirements-local.txt)
+    # "openai_compatible" -> any /v1/audio/speech endpoint (OpenAI, DeepInfra,
+    #                        a local Kokoro-FastAPI server, ...)
+    tts_provider: str = "fal"
+    tts_voice: str = "af_heart"
+    tts_speed: float = 1.0
+    fal_tts_model: str = "fal-ai/kokoro/american-english"
+    tts_base_url: str = "https://api.openai.com/v1"
+    tts_api_key: str = ""  # falls back to OPENAI_API_KEY
+    tts_model: str = "tts-1"
+    kokoro_model_dir: str = str(Path.home() / ".cache" / "nitroclip" / "kokoro")
+
+    # ---- Embeddings — any OpenAI-compatible endpoint ----
+    # Default: NVIDIA's free model on OpenRouter. Local: point base_url at
+    # Ollama (http://localhost:11434/v1) with e.g. model nomic-embed-text.
+    embeddings_base_url: str = "https://openrouter.ai/api/v1"
+    embeddings_api_key: str = ""  # falls back to OPENROUTER_API_KEY
+    embeddings_model: str = "nvidia/llama-nemotron-embed-vl-1b-v2:free"
+
+    # ---- STT (reference-video transcription) — any OpenAI-compatible endpoint ----
+    # Default: OpenAI Whisper. Local: point base_url at speaches / LM Studio.
+    stt_base_url: str = "https://api.openai.com/v1"
+    stt_api_key: str = ""  # falls back to OPENAI_API_KEY
+    stt_model: str = "whisper-1"
+
+    # ---- Image/video generation (fal.ai) ----
     fal_image_model: str = "fal-ai/flux/dev"
     fal_video_model: str = "fal-ai/veo3.1/fast/image-to-video"
 
@@ -45,7 +75,7 @@ class Settings(BaseSettings):
     # ---- Cost accounting estimates (USD; providers don't return spend) ----
     est_image_cost: float = 0.05
     est_video_cost_per_sec: float = 0.15
-    est_tts_cost: float = 0.02
+    est_tts_cost: float = 0.01
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
@@ -63,10 +93,9 @@ class MissingKeyError(Exception):
         super().__init__(f"Set {env_var} in .env to enable {purpose}.")
 
 
-# provider -> (settings attr, env var, what it unlocks)
-PROVIDERS = {
+# ---- Static providers: name -> (settings attr, env var, what it unlocks) ----
+STATIC_PROVIDERS = {
     "anthropic": ("anthropic_api_key", "ANTHROPIC_API_KEY", "script generation, brand voice, format extraction and captions (Claude)"),
-    "openai": ("openai_api_key", "OPENAI_API_KEY", "reference-video transcription, voiceover and product embeddings (OpenAI)"),
     "fal": ("fal_key", "FAL_KEY", "image generation (Flux) and video generation (Veo 3.1) via fal.ai"),
     "supabase": ("supabase_url", "SUPABASE_URL", "media storage (Supabase Storage)"),
     "supabase_key": ("supabase_service_role_key", "SUPABASE_SERVICE_ROLE_KEY", "media storage auth (Supabase service role key)"),
@@ -74,14 +103,61 @@ PROVIDERS = {
 }
 
 
+def _is_local_url(url: str) -> bool:
+    """Local endpoints (Ollama, Kokoro-FastAPI, speaches, ...) need no API key."""
+    return any(h in url for h in ("localhost", "127.0.0.1", "host.docker.internal"))
+
+
+def _tts_status() -> tuple[bool, str, str, str]:
+    """-> (configured, env_var hint, purpose, resolved key)"""
+    provider = settings.tts_provider
+    if provider == "local":
+        return True, "TTS_PROVIDER", "voiceover (Kokoro 82M, in-process)", ""
+    if provider == "fal":
+        return bool(settings.fal_key), "FAL_KEY", "voiceover (Kokoro 82M on fal.ai)", settings.fal_key
+    key = settings.tts_api_key or settings.openai_api_key
+    ok = bool(key) or _is_local_url(settings.tts_base_url)
+    return ok, "TTS_API_KEY", f"voiceover via {settings.tts_base_url}", key
+
+
+def _embeddings_status() -> tuple[bool, str, str, str]:
+    key = settings.embeddings_api_key or settings.openrouter_api_key
+    ok = bool(key) or _is_local_url(settings.embeddings_base_url)
+    return ok, "OPENROUTER_API_KEY", "product embeddings for semantic retrieval (free NVIDIA model on OpenRouter, or a local endpoint)", key
+
+
+def _stt_status() -> tuple[bool, str, str, str]:
+    key = settings.stt_api_key or settings.openai_api_key
+    ok = bool(key) or _is_local_url(settings.stt_base_url)
+    return ok, "OPENAI_API_KEY", "reference-video transcription (Whisper, or a local endpoint)", key
+
+
+CAPABILITIES = {
+    "tts": _tts_status,
+    "embeddings": _embeddings_status,
+    "stt": _stt_status,
+}
+
+
 def provider_status() -> dict[str, bool]:
-    return {name: bool(getattr(settings, attr)) for name, (attr, _, _) in PROVIDERS.items()}
+    status = {name: bool(getattr(settings, attr)) for name, (attr, _, _) in STATIC_PROVIDERS.items()}
+    for name, resolver in CAPABILITIES.items():
+        status[name] = resolver()[0]
+    return status
 
 
 def require(provider: str) -> str:
-    attr, env_var, purpose = PROVIDERS[provider]
-    value = getattr(settings, attr)
-    if not value:
+    """Return the resolved key for a provider/capability, or raise MissingKeyError.
+    Capabilities backed by a local endpoint resolve to an empty key — that's fine,
+    OpenAI-compatible local servers ignore the Authorization header."""
+    if provider in STATIC_PROVIDERS:
+        attr, env_var, purpose = STATIC_PROVIDERS[provider]
+        value = getattr(settings, attr)
+        if not value:
+            raise MissingKeyError(provider, env_var, purpose)
+        return value
+    ok, env_var, purpose, value = CAPABILITIES[provider]()
+    if not ok:
         raise MissingKeyError(provider, env_var, purpose)
     return value
 

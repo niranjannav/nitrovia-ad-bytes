@@ -1,0 +1,4 @@
+# Optional: in-process local TTS (TTS_PROVIDER=local).
+# Runs Kokoro 82M on CPU / Apple Silicon — model files (~330MB) are downloaded
+# to KOKORO_MODEL_DIR (default ~/.cache/nitroclip/kokoro) on first use.
+kokoro-onnx>=0.4

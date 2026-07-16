@@ -34,8 +34,9 @@ missing and what each unlocks — the app is usable incrementally:
 | none | UI loads, /health reports missing keys |
 | Supabase + `DATABASE_URL` | Brand ingest (products + images, no voice/embeddings) |
 | + `ANTHROPIC_API_KEY` | Brand voice, format templates, **script generation + storyboard approval** |
-| + `OPENAI_API_KEY` | Reference transcription, voiceover, semantic product retrieval |
-| + `FAL_KEY` | **Full pipeline**: image gen, video gen, stitched clips, export |
+| + `OPENROUTER_API_KEY` | Semantic product retrieval (NVIDIA's **free** embedding model) |
+| + `FAL_KEY` | **Full pipeline**: image gen, video gen, Kokoro voiceover, stitched clips, export |
+| + `OPENAI_API_KEY` (optional) | Whisper transcripts of reference videos (frames-only analysis works without) |
 
 The database schema is applied automatically on first boot (plain SQL
 migrations in `backend/migrations/`, tracked in `schema_migrations`). To apply
@@ -70,8 +71,25 @@ backend/
 ```
 
 Providers are isolated behind `app/providers/` — swapping e.g. fal for
-Replicate or OpenAI TTS for ElevenLabs touches one file each. Cost estimates
-per render accumulate on `segments.cost_accum` (tune `EST_*` env vars).
+Replicate touches one file. Cost estimates per render accumulate on
+`segments.cost_accum` (tune `EST_*` env vars).
+
+### Cheap / local inference (audio + embeddings)
+
+Voiceover, embeddings and transcription each speak the OpenAI-compatible API
+and switch between cloud and local with env vars only:
+
+| Capability | Cloud default | Local ($0, e.g. Apple Silicon) |
+|---|---|---|
+| Voiceover | Kokoro 82M on fal.ai (`FAL_KEY`, ~$0.02/1k chars) | `TTS_PROVIDER=local` → in-process kokoro-onnx (`pip install -r backend/requirements-local.txt`; ~330MB model auto-downloads) |
+| Embeddings | NVIDIA `llama-nemotron-embed-vl-1b-v2:free` on OpenRouter ($0) | `EMBEDDINGS_BASE_URL=http://localhost:11434/v1` + Ollama (`ollama pull nomic-embed-text`) |
+| Transcription | OpenAI Whisper (~$0.006/min) | `STT_BASE_URL` → speaches / LM Studio |
+
+A third TTS mode (`TTS_PROVIDER=openai_compatible`) accepts any
+`/v1/audio/speech` endpoint. **After switching embedding models, re-ingest the
+brand** — vectors from different models aren't comparable, so retrieval falls
+back to recency until chunks are re-embedded (each chunk records its
+`embedding_model`).
 
 **Design compositing (POD fidelity):** image models can't reproduce printed
 designs, so scenes are generated with a plain garment and the actual design

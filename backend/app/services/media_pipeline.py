@@ -111,10 +111,11 @@ async def generate_segment_video(segment: dict):
 
 
 async def generate_segment_tts(segment: dict):
-    audio_bytes = await audio.tts(segment["vo_text"])
-    path = f"projects/{segment['project_id']}/segments/{segment['id']}/vo_v{await _next_render_version(str(segment['id']), 'audio')}.mp3"
-    await storage.upload(path, audio_bytes, "audio/mpeg")
-    render = await _add_render(str(segment["id"]), "audio", "openai:" + settings.openai_tts_model, path, segment["vo_text"], settings.est_tts_cost)
+    audio_bytes, ext, mime = await audio.tts(segment["vo_text"])
+    path = f"projects/{segment['project_id']}/segments/{segment['id']}/vo_v{await _next_render_version(str(segment['id']), 'audio')}.{ext}"
+    await storage.upload(path, audio_bytes, mime)
+    cost = 0.0 if settings.tts_provider == "local" else settings.est_tts_cost
+    render = await _add_render(str(segment["id"]), "audio", audio.tts_provider_label(), path, segment["vo_text"], cost)
     await db.execute("UPDATE segments SET selected_audio_render_id = $2 WHERE id = $1", segment["id"], render["id"])
 
 
